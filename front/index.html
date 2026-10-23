@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业员工制度问答 RAG</title>
+    <script src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+            background: #f5f7fa;
+            color: #303133;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #app { display: flex; flex-direction: column; height: 100vh; }
+        .header {
+            background: linear-gradient(135deg, #409eff 0%, #337ecc 100%);
+            color: #fff;
+            padding: 14px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+        }
+        .header h1 { font-size: 18px; font-weight: 500; }
+        .header .hint { font-size: 13px; opacity: 0.85; }
+
+        .chat-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .messages {
+            flex: 1; overflow-y: auto; padding: 20px 24px;
+        }
+        .msg { margin-bottom: 16px; }
+        .msg.user { text-align: right; }
+        .msg-bubble {
+            display: inline-block; max-width: 80%; padding: 10px 14px;
+            border-radius: 8px; font-size: 14px; line-height: 1.6;
+            text-align: left; white-space: pre-wrap; word-break: break-word;
+        }
+        .msg.user .msg-bubble { background: #409eff; color: #fff; }
+        .msg.bot .msg-bubble {
+            background: #fff; color: #303133;
+            border: 1px solid #e4e7ed;
+        }
+        .msg-bubble.markdown-body { white-space: normal; }
+        .msg-bubble.markdown-body p { margin: 0 0 8px; }
+        .msg-bubble.markdown-body p:last-child { margin-bottom: 0; }
+        .msg-bubble.markdown-body ul, .msg-bubble.markdown-body ol { padding-left: 20px; margin: 4px 0 8px; }
+        .msg-bubble.markdown-body li { margin: 2px 0; }
+        .msg-bubble.markdown-body strong { font-weight: 600; }
+        .msg-bubble.markdown-body code { background: #f4f4f5; padding: 1px 4px; border-radius: 3px; font-size: 13px; }
+        .msg-bubble.markdown-body table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+        .msg-bubble.markdown-body th, .msg-bubble.markdown-body td { border: 1px solid #dcdfe6; padding: 4px 8px; }
+        .msg-bubble.markdown-body th { background: #f5f7fa; }
+        .msg-bubble.markdown-body h1, .msg-bubble.markdown-body h2, .msg-bubble.markdown-body h3 { margin: 8px 0 4px; font-size: 15px; }
+        .msg.bot { display: flex; flex-direction: column; gap: 8px; }
+
+        .trace {
+            background: #fafafa; border-left: 3px solid #409eff;
+            padding: 8px 12px; font-size: 12px; color: #606266;
+            border-radius: 0 4px 4px 0; max-width: 80%;
+        }
+        .trace .trace-title { color: #909399; margin-bottom: 4px; }
+        .trace .step { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+        .trace .step .name { font-weight: 500; color: #303133; }
+        .trace .step .status {
+            font-size: 11px; padding: 1px 6px; border-radius: 8px;
+            background: #ecf5ff; color: #409eff;
+        }
+        .trace .step .status.completed { background: #f0f9eb; color: #67c23a; }
+        .trace .step .status.in_progress { background: #fdf6ec; color: #e6a23c; }
+
+        .references {
+            margin-top: 8px; font-size: 12px; color: #909399;
+            border-top: 1px dashed #e4e7ed; padding-top: 6px;
+        }
+        .references .ref-item {
+            background: #f4f4f5; padding: 4px 8px; border-radius: 3px;
+            margin-top: 4px; color: #606266;
+        }
+
+        .input-area {
+            border-top: 1px solid #e4e7ed; padding: 12px 24px;
+            background: #fff; display: flex; gap: 10px; align-items: flex-end;
+        }
+        .input-area textarea {
+            flex: 1; resize: none; border: 1px solid #dcdfe6; border-radius: 4px;
+            padding: 8px 12px; font-size: 14px; font-family: inherit;
+            min-height: 40px; max-height: 120px; outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-area textarea:focus { border-color: #409eff; }
+        .input-area .btn {
+            display: inline-block; padding: 0 16px; height: 40px; line-height: 40px;
+            border: none; border-radius: 4px; cursor: pointer; font-size: 13px;
+            transition: all 0.2s;
+        }
+        .btn-primary { background: #409eff; color: #fff; }
+        .btn-primary:hover { background: #337ecc; }
+        .btn-primary:disabled { background: #a0cfff; cursor: not-allowed; }
+
+        .empty {
+            text-align: center; color: #c0c4cc; padding: 60px 20px;
+        }
+        .empty p { font-size: 14px; margin-top: 8px; }
+        .empty .examples {
+            margin-top: 16px; color: #909399; font-size: 13px; line-height: 2;
+        }
+        .empty .examples div { cursor: pointer; }
+        .empty .examples div:hover { color: #409eff; }
+
+        .strategy-card {
+            background: #fff8e1; border-left: 3px solid #e6a23c;
+            padding: 8px 12px; font-size: 12px; border-radius: 0 4px 4px 0;
+            max-width: 80%;
+        }
+        .strategy-card .label { color: #e6a23c; font-weight: 500; margin-bottom: 4px; }
+        .strategy-card .reasoning { color: #606266; white-space: pre-wrap; }
+
+        .tool-chip {
+            display: inline-block; padding: 2px 8px; border-radius: 10px;
+            font-size: 11px; margin: 2px;
+        }
+        .tool-chip.done { background: #f0f9eb; color: #67c23a; }
+        .tool-chip.running { background: #fdf6ec; color: #e6a23c; }
+
+        .cursor::after {
+            content: '▊'; display: inline-block; color: #409eff;
+            animation: blink 1s steps(2) infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="header">
+        <h1>企业员工制度问答 RAG</h1>
+        <span class="hint">Agent 自主路由 · 多路检索 · 重排精排</span>
+    </div>
+
+    <div class="chat-area">
+        <div class="messages" ref="messagesEl">
+            <div v-if="!messages.length" class="empty">
+                <p>提问示例（点击直接发送）：</p>
+                <div class="examples">
+                    <div @click="useExample('工龄6年病假10天工资怎么发？')">工龄6年病假10天工资怎么发？</div>
+                    <div @click="useExample('连续旷工几天可以解除劳动合同？')">连续旷工几天可以解除劳动合同？</div>
+                    <div @click="useExample('出差住宿费报销需要谁审批？')">出差住宿费报销需要谁审批？</div>
+                    <div @click="useExample('年休假有几天？怎么折算？')">年休假有几天？怎么折算？</div>
+                </div>
+            </div>
+
+            <div v-for="(msg, i) in messages" :key="i" :class="['msg', msg.role]">
+                <!-- 策略卡片 -->
+                <div v-if="msg.strategy" class="strategy-card">
+                    <div class="label">策略分析</div>
+                    <div class="reasoning">{{ msg.strategy.reasoning || msg.strategy }}</div>
+                    <div v-if="msg.strategy.sub_questions && msg.strategy.sub_questions.length">
+                        <div v-for="(sq, j) in msg.strategy.sub_questions" :key="j" style="margin-top:4px;">
+                            → {{ sq }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 工具调用 trace -->
+                <div v-if="msg.tools && msg.tools.length" class="trace">
+                    <div class="trace-title">检索工具调用</div>
+                    <div v-for="(t, j) in msg.tools" :key="j" class="step">
+                        <span :class="['tool-chip', t.status === 'completed' ? 'done' : 'running']">
+                            {{ t.name }}
+                        </span>
+                        <span v-if="t.args && Object.keys(t.args).length" style="color:#909399;">
+                            args: {{ JSON.stringify(t.args) }}
+                        </span>
+                    </div>
+                </div>
+
+                <!-- todos -->
+                <div v-if="msg.todos && msg.todos.length" class="trace">
+                    <div class="trace-title">执行步骤</div>
+                    <div v-for="(t, j) in msg.todos" :key="j" class="step">
+                        <span class="name">{{ t.content }}</span>
+                        <span :class="['status', t.status]">{{ t.status }}</span>
+                    </div>
+                </div>
+
+                <!-- 答案气泡（bot用markdown渲染，user纯文本） -->
+                <div v-if="msg.content && msg.role === 'bot'" class="msg-bubble markdown-body"
+                     :class="{ cursor: msg.streaming }"
+                     v-html="renderMarkdown(msg.content)"></div>
+                <div v-else-if="msg.content" class="msg-bubble" :class="{ cursor: msg.streaming }">{{ msg.content }}</div>
+
+                <!-- 引用文档 -->
+                <div v-if="msg.references && msg.references.length" class="references">
+                    <div>引用文档（{{ msg.references.length }}）：</div>
+                    <div v-for="(r, j) in msg.references" :key="j" class="ref-item">
+                        [{{ j+1 }}] {{ r.snippet }}
+                        <span v-if="r.source" style="color:#c0c4cc;">来源: {{ r.source }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-area">
+            <textarea v-model="inputText"
+                      @keydown.enter.exact.prevent="send"
+                      placeholder="输入问题，Enter 发送..."
+                      rows="1"></textarea>
+            <button class="btn btn-primary"
+                    :disabled="!inputText.trim() || loading"
+                    @click="send">
+                {{ loading ? '回答中' : '发送' }}
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+const { createApp, ref, nextTick } = Vue;
+
+createApp({
+    setup() {
+        const API_BASE = 'http://127.0.0.1:8000';
+        const messages = ref([]);
+        const inputText = ref('');
+        const loading = ref(false);
+        const messagesEl = ref(null);
+
+        const useExample = (q) => {
+            inputText.value = q;
+            send();
+        };
+
+        const send = async () => {
+            const query = inputText.value.trim();
+            if (!query || loading.value) return;
+            inputText.value = '';
+            loading.value = true;
+
+            // 创建一条 bot 消息，逐步填充内容
+            const botMsg = ref({
+                role: 'bot',
+                strategy: null,
+                tools: [],
+                todos: [],
+                content: '',
+                streaming: true,
+                references: []
+            });
+            messages.value.push({ role: 'user', content: query });
+            messages.value.push(botMsg.value);
+            await scrollToBottom();
+
+            // fetch + ReadableStream 解析 SSE
+            const url = `${API_BASE}/api/chat/ask?query=${encodeURIComponent(query)}`;
+            try {
+                const res = await fetch(url);
+                if (!res.ok) {
+                    botMsg.value.content = `请求失败：HTTP ${res.status}`;
+                    botMsg.value.streaming = false;
+                    return;
+                }
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    const frames = buffer.split('\n\n');
+                    buffer = frames.pop();
+                    for (const frame of frames) {
+                        parseSseFrame(frame, botMsg);
+                        await scrollToBottom();
+                    }
+                }
+            } catch (e) {
+                botMsg.value.content = `请求异常: ${e.message}`;
+            } finally {
+                botMsg.value.streaming = false;
+                loading.value = false;
+            }
+        };
+
+        const parseSseFrame = (frame, botMsg) => {
+            const lines = frame.split('\n');
+            let event = 'message';
+            let data = '';
+            for (const line of lines) {
+                if (line.startsWith('event:')) event = line.slice(6).trim();
+                else if (line.startsWith('data:')) data += line.slice(5).trim();
+            }
+            if (!data) return;
+            let payload;
+            try { payload = JSON.parse(data); } catch (e) { payload = data; }
+
+            switch (event) {
+                case 'strategy':
+                    botMsg.value.strategy = payload;
+                    break;
+                case 'todos':
+                    botMsg.value.todos = payload;
+                    break;
+                case 'tool_start': {
+                    const name = payload.name;
+                    const existing = botMsg.value.tools.find(t => t.name === name);
+                    if (existing) {
+                        existing.status = 'in_progress';
+                        existing.args = payload.args || {};
+                    } else {
+                        botMsg.value.tools.push({
+                            name, args: payload.args || {}, status: 'in_progress'
+                        });
+                    }
+                    break;
+                }
+                case 'tool_end': {
+                    const name = payload.name;
+                    const existing = botMsg.value.tools.find(t => t.name === name);
+                    if (existing) existing.status = 'completed';
+                    else botMsg.value.tools.push({ name, args: {}, status: 'completed' });
+                    break;
+                }
+                case 'answer':
+                    botMsg.value.content += payload;
+                    break;
+                case 'done':
+                    botMsg.value.streaming = false;
+                    if (payload.todos) botMsg.value.todos = payload.todos;
+                    if (payload.references) botMsg.value.references = payload.references;
+                    break;
+                case 'error':
+                    botMsg.value.content = (botMsg.value.content || '') +
+                        `\n[错误] ${payload.message || JSON.stringify(payload)}`;
+                    break;
+            }
+        };
+
+        const scrollToBottom = async () => {
+            await nextTick();
+            if (messagesEl.value) {
+                messagesEl.value.scrollTop = messagesEl.value.scrollHeight;
+            }
+        };
+
+        // markdown 渲染：先预处理清理 LLM 常犯的残缺，再用 marked 解析
+        const renderMarkdown = (text) => {
+            if (!text) return '';
+            try {
+                let cleaned = preprocessMarkdown(text);
+                return marked.parse(cleaned, { breaks: true, gfm: true });
+            } catch (e) {
+                return text;
+            }
+        };
+
+        // 清理 LLM 输出的残缺 markdown
+        const preprocessMarkdown = (text) => {
+            let t = text;
+
+            // 1. 把 |...|...| 这种疑似表格但不规范的行，转为纯文本（去掉 |）
+            //    合法 markdown 表格：必须有表头 + 对齐行（|---|---|），否则当普通文本处理
+            const lines = t.split('\n');
+            const processed = [];
+            let i = 0;
+            while (i < lines.length) {
+                const line = lines[i];
+                // 检查这行是不是表格表头（含 | 且下一行是对齐行 |---|）
+                if (line.includes('|') && i + 1 < lines.length) {
+                    const next = lines[i + 1];
+                    // 判断下一行是不是合法的对齐行
+                    const isAlignRow = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(next);
+                    if (isAlignRow) {
+                        // 合法表格，保留，跳过对齐行
+                        processed.push(line);
+                        processed.push(next);
+                        i += 2;
+                        // 继续收集表格数据行
+                        while (i < lines.length && lines[i].includes('|') && !/^\s*$/.test(lines[i])) {
+                            processed.push(lines[i]);
+                            i++;
+                        }
+                        continue;
+                    } else {
+                        // 不是合法表格，把这行的 | 去掉当普通文本
+                        processed.push(line.replace(/\|/g, ''));
+                        i++;
+                        continue;
+                    }
+                } else {
+                    processed.push(line);
+                    i++;
+                }
+            }
+            t = processed.join('\n');
+
+            // 2. 清理不完整的 --- 分隔线（LLM 常在表格残片中输出）
+            t = t.replace(/^\s*-{3,}\s*$/gm, '');
+
+            // 3. 修复不成对的 ** 加粗标记
+            // 统计 ** 出现次数，奇数的话去掉最后一个
+            const fixUnpaired = (marker) => {
+                const parts = t.split(marker);
+                if (parts.length % 2 === 0) {
+                    // 奇数个标记，去掉最后一个
+                    const lastIdx = t.lastIndexOf(marker);
+                    t = t.slice(0, lastIdx) + t.slice(lastIdx + marker.length);
+                }
+            };
+            fixUnpaired('**');
+            fixUnpaired('*');
+
+            // 4. 清理多余的 --- 前后空行
+            t = t.replace(/\n{3,}/g, '\n\n');
+
+            return t.trim();
+        };
+
+        return {
+            messages, inputText, loading, messagesEl,
+            useExample, send, renderMarkdown
+        };
+    }
+}).mount('#app');
+</script>
+</body>
+</html>
